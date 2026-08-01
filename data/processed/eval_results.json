@@ -1,0 +1,14 @@
+{
+  "text": {
+    "hit_rate": 0.4111,
+    "mrr": 0.2143
+  },
+  "vector": {
+    "hit_rate": 0.2111,
+    "mrr": 0.0815
+  },
+  "hybrid": {
+    "hit_rate": 0.3889,
+    "mrr": 0.2031
+  }
+}

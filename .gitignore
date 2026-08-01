@@ -1,0 +1,10 @@
+.env
+data/raw/
+*.duckdb
+models/
+__pycache__/
+.venv/
+.DS_Store
+*.zip
+*.pdf
+*.xlsx
