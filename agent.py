@@ -3,6 +3,7 @@ load_dotenv()
 
 import os, json
 import logfire
+
 if os.getenv('LOGFIRE_TOKEN'):
     logfire.configure()
 
@@ -90,18 +91,19 @@ SOURCE_MAP = {
 }
 
 def run_tool(name: str, args: dict) -> str:
-    if name == "search":
-        results = text_search(args.get("query", ""), _text_idx, n=3)
-        return '\n\n'.join(f"[{r['source']}]\n{r['content'][:600]}" for r in results)
-    elif name == "search_by_source":
-        raw_source = args.get("source", "")
-        source = SOURCE_MAP.get(raw_source, raw_source)
-        results = text_search(args.get("query", ""), _text_idx, n=5)
-        filtered = [r for r in results if r.get('source') == source]
-        if not filtered:
-            return '\n\n'.join(f"[{r['source']}]\n{r['content'][:600]}" for r in results[:3])
-        return '\n\n'.join(f"[{r['source']}]\n{r['content'][:600]}" for r in filtered[:3])
-    return "Unknown tool."
+    with logfire.span('tool_call', tool=name, query=args.get('query', '')):
+        if name == "search":
+            results = text_search(args.get("query", ""), _text_idx, n=3)
+            return '\n\n'.join(f"[{r['source']}]\n{r['content'][:600]}" for r in results)
+        elif name == "search_by_source":
+            raw_source = args.get("source", "")
+            source = SOURCE_MAP.get(raw_source, raw_source)
+            results = text_search(args.get("query", ""), _text_idx, n=5)
+            filtered = [r for r in results if r.get('source') == source]
+            if not filtered:
+                return '\n\n'.join(f"[{r['source']}]\n{r['content'][:600]}" for r in results[:3])
+            return '\n\n'.join(f"[{r['source']}]\n{r['content'][:600]}" for r in filtered[:3])
+        return "Unknown tool."
 
 async def run_agent(question: str, deps: Deps) -> str:
     context = (
@@ -114,57 +116,63 @@ async def run_agent(question: str, deps: Deps) -> str:
         {"role": "user", "content": f"{context}\n\nQuestion: {question}"}
     ]
 
-    for _ in range(6):
-        try:
-            response = await groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=messages,
-                tools=TOOLS,
-                tool_choice="auto",
-            )
-        except Exception:
-            # Malformed tool call - retry without tools to get a direct answer
+    with logfire.span('agent_run', question=question, region=deps.region, target_role=deps.target_role):
+        for iteration in range(6):
             try:
-                response = await groq_client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
-                    messages=messages,
-                )
-                return response.choices[0].message.content or "No answer generated."
-            except Exception as e:
-                return f"An error occurred: {str(e)}"
+                with logfire.span('llm_call', iteration=iteration):
+                    response = await groq_client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=messages,
+                        tools=TOOLS,
+                        tool_choice="auto",
+                    )
+                    logfire.info('llm_response',
+                        input_tokens=response.usage.prompt_tokens if response.usage else 0,
+                        output_tokens=response.usage.completion_tokens if response.usage else 0,
+                    )
+            except Exception:
+                try:
+                    with logfire.span('llm_fallback'):
+                        response = await groq_client.chat.completions.create(
+                            model="llama-3.3-70b-versatile",
+                            messages=messages,
+                        )
+                    return response.choices[0].message.content or "No answer generated."
+                except Exception as e:
+                    return f"An error occurred: {str(e)}"
 
-        msg = response.choices[0].message
+            msg = response.choices[0].message
 
-        if not msg.tool_calls:
-            return msg.content or "No answer generated."
+            if not msg.tool_calls:
+                return msg.content or "No answer generated."
 
-        messages.append({
-            "role": "assistant",
-            "content": msg.content or "",
-            "tool_calls": [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments
-                    }
-                }
-                for tc in msg.tool_calls
-            ]
-        })
-
-        for tc in msg.tool_calls:
-            try:
-                args = json.loads(tc.function.arguments)
-            except json.JSONDecodeError:
-                args = {}
-            result = run_tool(tc.function.name, args)
             messages.append({
-                "role": "tool",
-                "tool_call_id": tc.id,
-                "content": result
+                "role": "assistant",
+                "content": msg.content or "",
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments
+                        }
+                    }
+                    for tc in msg.tool_calls
+                ]
             })
+
+            for tc in msg.tool_calls:
+                try:
+                    args = json.loads(tc.function.arguments)
+                except json.JSONDecodeError:
+                    args = {}
+                result = run_tool(tc.function.name, args)
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": result
+                })
 
     return "Maximum search iterations reached."
 
