@@ -3,7 +3,8 @@ load_dotenv()
 
 import os, json
 import logfire
-logfire.configure()
+if os.getenv('LOGFIRE_TOKEN'):
+    logfire.configure()
 
 from dataclasses import dataclass
 from pydantic import BaseModel
