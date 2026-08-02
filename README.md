@@ -3,6 +3,9 @@
 > A RAG + agentic assistant that answers developer career questions grounded in data from 65,000+ real developers and global labor market research.
 
 **Live app**: https://devpath-tech-career-roadmap-agent.streamlit.app/
+
+![Landing Page](media/devpath-title.png)
+
 > Note: First load may take 60 seconds as Streamlit Community Cloud wakes up on demand. Please be patient when accessing the site.
 
 Built as a final project for [LLM Zoomcamp 2026](https://github.com/DataTalksClub/llm-zoomcamp) by DataTalksClub.
@@ -25,7 +28,7 @@ DevPath provides recommendations backed by real developer survey data, official 
 
 ## Demo
 
-[Insert video here]
+![Demo Vid](media/web-demo.mov)
 
 Try asking:
 - *"I know Python and SQL. How do I become a data engineer?"*
@@ -93,16 +96,20 @@ All datasets are **static snapshots**, meaning the knowledge base remains the sa
 
 ## Architecture
 
-| Component | Tool | Why |
-|-----------|------|-----|
-| LLM | Groq llama-3.3-70b-versatile | Fast, free tier, good with following instructions |
-| Agent | Raw Groq client + AgentShim | Pydantic AI 2.22.0 bug workaround |
-| Search | minsearch text + ONNX vector + RRF hybrid | Multiple retrieval strategies evaluated |
-| Embeddings | all-MiniLM-L6-v2 ONNX | Local, no API cost |
-| Ingestion | dlt pipeline -> DuckDB | Course-standard ingestion pattern |
-| Monitoring | Logfire traces | Per-request span tracing |
-| Interface | Streamlit Community Cloud | Free, no Docker needed for deployment |
-| Local run | Docker Compose | Containerized FastAPI + Streamlit |
+```mermaid
+flowchart TD
+    U([User]) --> ST[Streamlit UI\nstreamlit_app.py]
+    ST --> AG[AgentShim\nRaw Groq Client + Manual Tool Loop]
+    ST --> FB[Feedback\nthumbs up/down]
+    AG --> LLM[llama-3.3-70b-versatile\nGroq free tier]
+    AG --> LF[Logfire\nagent_run / llm_call / tool_call spans]
+    LLM -->|search tool| IDX[index.py\ntext search + vector + RRF]
+    LLM -->|search_by_source tool| IDX
+    IDX --> DB[(DuckDB\n137 chunks)]
+    DB --> SO[Stack Overflow 2024\n34 role chunks\n185 countries]
+    DB --> ON[O*NET 29.0\n8 tech occupation chunks\nCC BY 4.0]
+    DB --> WEF[WEF Future of Jobs 2025\n95 regional chunks\n55 economies]
+```
 
 ---
 
@@ -128,18 +135,20 @@ uv run python rag/evaluate.py
 
 ## Monitoring
 
-[Insert 2 image here]
+DevPath uses [Logfire](https://logfire.dev) for observability. Every agent run produces a trace with child spans for each LLM call, tool call, and fallback recovery.
 
-Logfire collects a trace for every agent run showing:
-- Full agent loop span with duration
-- Each tool call (search, search_by_source) as a child span
-- Token usage per Groq API call
+![Logfire Traces](media/logfire_traces.png)
 
-Configure `LOGFIRE_TOKEN` in `.env` to enable. View traces at [logfire.dev](https://logfire.dev).
+**What is tracked per run:**
+- `agent_run` : full question-to-answer duration (avg ~2.5s)
+- `llm_call` : each Groq API call with token usage
+- `tool_call` : each search tool invocation with query and source
+- `llm_fallback` : triggered when Groq generates malformed tool calls (auto-recovery)
 
-User feedback (thumbs up / thumbs down) is also collected on each answer via the Streamlit UI.
+Configure `LOGFIRE_TOKEN` in `.env` to enable tracing.
+View live traces at [logfire.dev](https://logfire.dev).
 
-> Screenshot: add Logfire dashboard screenshot here
+User feedback (thumbs up / thumbs down) is collected per answer via the Streamlit UI.
 
 ---
 
