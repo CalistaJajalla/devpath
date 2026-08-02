@@ -28,7 +28,7 @@ DevPath provides recommendations backed by real developer survey data, official 
 
 ## Demo
 
-![Demo Vid](media/web-demo.mov)
+![DevPath Demo](media/demo.gif)
 
 Try asking:
 - *"I know Python and SQL. How do I become a data engineer?"*
